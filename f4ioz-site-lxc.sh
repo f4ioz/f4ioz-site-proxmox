@@ -173,14 +173,26 @@ wait_network() {
 }
 
 install_packages() {
+  msg_info "Configuration des locales…"
+  pct exec "$CTID" -- bash -c '
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq locales >/dev/null 2>&1
+    sed -i "s/^# *\(en_US.UTF-8\)/\1/" /etc/locale.gen
+    sed -i "s/^# *\(fr_FR.UTF-8\)/\1/" /etc/locale.gen
+    locale-gen >/dev/null 2>&1
+    update-locale LANG=en_US.UTF-8
+  '
+  msg_ok "Locales générées."
+
   msg_info "apt update + upgrade…"
   pct exec "$CTID" -- bash -c \
-    'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' >/dev/null
+    'export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+     apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' >/dev/null
   msg_ok "Système à jour."
 
   msg_info "Installation des paquets…"
   pct exec "$CTID" -- bash -c \
-    'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    'export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
        curl ca-certificates git sudo tmux nano vim less jq \
        python3 python3-venv python3-pip python3-dev \
        build-essential pkg-config \
