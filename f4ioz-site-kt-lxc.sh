@@ -32,7 +32,7 @@ command -v pct >/dev/null && command -v pveam >/dev/null || { msg_err "pct/pveam
 find_next_ctid() { local id=100; while pct status "$id" &>/dev/null; do ((id++)); done; echo "$id"; }
 
 # Une adresse libre sur le réseau du bridge : ni prise par une CT/VM du Proxmox (même arrêtée),
-# ni qui répond (ARP ou ping). De .50 à .250, hors de la plupart des plages DHCP des box.
+# ni qui répond (ARP ou ping). De .211 à .254 : la box de F4IOZ distribue jusqu’à .210.
 propose_ip() {
   D_IP=""; D_GW=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
   local cidr; cidr=$(ip -4 -o addr show "$BRIDGE" 2>/dev/null | awk '{print $4; exit}')
@@ -42,7 +42,7 @@ propose_ip() {
   local prises; prises=$(cat /etc/pve/lxc/*.conf /etc/pve/qemu-server/*.conf 2>/dev/null | grep -o 'ip=[0-9.]*' | cut -d= -f2)
   msg_info "Recherche d'une adresse libre sur ${base}.0/24…"
   local n ip
-  for n in $(seq 50 250); do
+  for n in $(seq 211 254); do
     ip="${base}.${n}"
     [[ "$ip" == "${cidr%/*}" || "$ip" == "$D_GW" ]] && continue
     grep -qx "$ip" <<<"$prises" && continue
@@ -51,7 +51,7 @@ propose_ip() {
     else ip neigh show "$ip" 2>/dev/null | grep -qE 'REACHABLE|STALE|DELAY' && continue; fi
     D_IP="${ip}/24"; msg_ok "Adresse libre proposée : ${ip} (vérifie qu'elle est hors de la plage DHCP de ta box)"; return 0
   done
-  msg_warn "Aucune adresse libre trouvée entre .50 et .250."
+  msg_warn "Aucune adresse libre trouvée entre .211 et .254."
 }
 
 prompt_config() {
