@@ -31,6 +31,29 @@ command -v pct >/dev/null && command -v pveam >/dev/null || { msg_err "pct/pveam
 
 find_next_ctid() { local id=100; while pct status "$id" &>/dev/null; do ((id++)); done; echo "$id"; }
 
+# Une adresse libre sur le réseau du bridge : ni prise par une CT/VM du Proxmox (même arrêtée),
+# ni qui répond (ARP ou ping). De .50 à .250, hors de la plupart des plages DHCP des box.
+propose_ip() {
+  D_IP=""; D_GW=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+  local cidr; cidr=$(ip -4 -o addr show "$BRIDGE" 2>/dev/null | awk '{print $4; exit}')
+  [[ -n "$cidr" ]] || return 0
+  local masque=${cidr#*/} base; base=$(echo "${cidr%/*}" | cut -d. -f1-3)
+  [[ "$masque" == "24" ]] || return 0
+  local prises; prises=$(cat /etc/pve/lxc/*.conf /etc/pve/qemu-server/*.conf 2>/dev/null | grep -o 'ip=[0-9.]*' | cut -d= -f2)
+  msg_info "Recherche d'une adresse libre sur ${base}.0/24…"
+  local n ip
+  for n in $(seq 50 250); do
+    ip="${base}.${n}"
+    [[ "$ip" == "${cidr%/*}" || "$ip" == "$D_GW" ]] && continue
+    grep -qx "$ip" <<<"$prises" && continue
+    ping -c1 -W1 "$ip" &>/dev/null && continue
+    if command -v arping >/dev/null; then arping -c2 -w2 -I "$BRIDGE" "$ip" &>/dev/null && continue
+    else ip neigh show "$ip" 2>/dev/null | grep -qE 'REACHABLE|STALE|DELAY' && continue; fi
+    D_IP="${ip}/24"; msg_ok "Adresse libre proposée : ${ip} (vérifie qu'elle est hors de la plage DHCP de ta box)"; return 0
+  done
+  msg_warn "Aucune adresse libre trouvée entre .50 et .250."
+}
+
 prompt_config() {
   D_CTID=$(find_next_ctid)
   echo -e "${BOLD}Nouvelle CT du site F4IOZ (Kotlin)${NC} (Entrée = défaut)"; echo
@@ -42,13 +65,14 @@ prompt_config() {
   read -rp "Swap (Mo) [${D_SWAP}] : " SWAP;          SWAP=${SWAP:-$D_SWAP}
   read -rp "Storage CT [${D_STORAGE}] : " STORAGE;   STORAGE=${STORAGE:-$D_STORAGE}
   read -rp "Bridge réseau [${D_BRIDGE}] : " BRIDGE;  BRIDGE=${BRIDGE:-$D_BRIDGE}
-  # Une IP fixe : nginx et le pare-feu en dépendent.
+  # Une IP fixe : nginx et le pare-feu en dépendent. Une adresse libre est proposée.
+  propose_ip
   while :; do
-    read -rp "IP fixe en CIDR (ex 192.168.0.51/24) : " IP
+    read -rp "IP fixe en CIDR${D_IP:+ [${D_IP}]} : " IP; IP=${IP:-$D_IP}
     [[ "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]] && break
     msg_warn "Une IP fixe est nécessaire (ex 192.168.0.51/24)."
   done
-  read -rp "Passerelle [192.168.0.1] : " GATEWAY;    GATEWAY=${GATEWAY:-192.168.0.1}
+  read -rp "Passerelle [${D_GW:-192.168.0.1}] : " GATEWAY; GATEWAY=${GATEWAY:-${D_GW:-192.168.0.1}}
   echo
   echo "Ta propre clé SSH publique pour root (en plus de celle de Claude), ou Entrée :"
   read -r SSH_PUBKEY
